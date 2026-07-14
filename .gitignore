@@ -1,0 +1,40 @@
+# ─────────────────────────────────────────────────────────────
+# Excluded per request
+# ─────────────────────────────────────────────────────────────
+docs/
+archive/
+REVIEW_findings.md
+
+# ─────────────────────────────────────────────────────────────
+# Experimental data & pipeline outputs (keep data out of git)
+# NOTE: 1_preprocessing/lib/parameters_beam_pattern.mat is a required
+# template and is intentionally NOT matched by the patterns below.
+# ─────────────────────────────────────────────────────────────
+*_combined.mat
+*_detected.mat
+*_detected.csv
+*_bat_pos.mat
+mic_pos_*.mat
+*_bp_proc*.mat
+*_checked.mat
+# any output folder if you point cfg.out_dir inside the repo:
+output/
+outputs/
+
+# ─────────────────────────────────────────────────────────────
+# MATLAB temp / generated
+# ─────────────────────────────────────────────────────────────
+*.asv
+*.m~
+*.mex*
+slprj/
+codegen/
+*.slxc
+
+# ─────────────────────────────────────────────────────────────
+# OS / editor junk
+# ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp

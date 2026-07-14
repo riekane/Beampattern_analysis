@@ -1,0 +1,4 @@
+# Treat these as binary so git doesn't try to diff/merge them
+*.mlx binary
+*.mat binary
+*.png binary
