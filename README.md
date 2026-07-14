@@ -7,8 +7,7 @@ capture of the bat's position.
 
 Beam direction is recovered **from the sound itself**: after correcting each mic's
 received level for propagation, the direction in which the emitted energy is
-greatest is the beam axis. Because that axis is where a bat usually points its
-head, it doubles as a head-aim proxy — with the caveat below.
+greatest is the beam axis. 
 
 ---
 
