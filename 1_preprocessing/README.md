@@ -59,11 +59,6 @@ comparing directions** — so beam direction is unaffected; only the absolute SP
 scale is left uncalibrated. Supply `cfg.mic_sens_file` / `cfg.mic_bp_file` later
 to replace this assumption.
 
-**Marker-free track.** With a single body marker, head aim is seeded from the
-smoothed track velocity. This only feeds `bp_proc`'s internal bookkeeping; the
-beam-based proxy in stage 3 replaces it, so its accuracy does not affect the
-result.
-
 ---
 
 ## `cfg` (see `bp_proc_vicon.m` header for the full list)
