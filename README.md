@@ -146,36 +146,6 @@ stage README. **All four stage-1 inputs must be from the same trial.**
 
 ---
 
-## Calibration status
-
-There is **no measured per-mic calibration yet**, so the array is treated as
-identical capsules (flat sensitivity, omnidirectional, equal gain). This is valid
-*for direction*: identical terms are equal on every mic and cancel when you ask
-which direction is loudest, so only the distance-dependent transmission loss —
-computed from geometry and temperature/humidity, no calibration file — shifts the
-answer. **Absolute SPL is therefore uncalibrated (relative only).** When real
-calibration exists, point `cfg.mic_sens_file` / `cfg.mic_bp_file` at it; no code
-change is needed. Details in [`1_preprocessing/README.md`](1_preprocessing/README.md).
-
-## Temporal alignment (read this)
-
-Stage 1 places each call on the flight trajectory by back-timing it by the
-bat→mic travel time. This requires the audio clock and the Vicon clock to share a
-common time origin. **The current code assumes they do** (both time bases are
-referenced to the end of their recording). The recording's TTL synchronization
-frames are not yet used. If the two systems are not guaranteed to stop together,
-derive the offset from the TTL frames in stage 1 before trusting absolute
-geometry.
-
-## Interpreting the output — one caveat
-
-The beam axis equals head aim only insofar as the bat points its beam where its
-head points; bats can steer the beam somewhat independently. On reference data
-that *does* have head markers, the beam proxy and marker-measured head aim differ
-by roughly 30–40° median. Treat the output as a **beam-aim estimate**, not a
-substitute for a head marker.
-
----
 
 ## Notes
 
