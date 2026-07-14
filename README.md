@@ -152,16 +152,3 @@ stage README. **All four stage-1 inputs must be from the same trial.**
 - Reused signal-processing helpers live in each stage's `lib/` and are
   third-party or previously validated code (atmospheric absorption, radial-basis
   interpolation, Gaussian fit); the pipeline is otherwise self-contained.
-
----
-
-## License
-
-Licensed under the **Apache License 2.0** — see [`LICENSE`](LICENSE). Original
-work © 2026 Rie Kaneko.
-
-This repository bundles third-party code (the beam-pattern processing toolbox by
-Wu-Jung Lee, Apache-2.0; and File Exchange utilities for RBF interpolation,
-Gaussian fitting, and atmospheric absorption). Their authorship and terms are
-listed in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) and retained in the
-source-file headers. See also [`NOTICE`](NOTICE).
