@@ -8,10 +8,6 @@ function out = run_beamaim_maze(cfg)
 % with the interpolation + Gaussian-fit beam-aim estimate ported from beam_aim.m
 % (see estimate_beam_direction.m).
 %
-% WHY: Rie's rig has NO head marker, so head direction cannot be measured. It is
-% ESTIMATED from the sonar beam: the direction of maximum emitted energy is used
-% as a proxy for where the head points. The interpolation+fit gives a CONTINUOUS
-% beam-aim angle (and beam width) instead of snapping to the loudest mic.
 %
 % cfg FIELDS
 %   .bp_proc_file  - processed beam file (…_mic_data_bp_proc.mat). Must contain
@@ -50,6 +46,11 @@ db_field      = getdef(cfg,'db_field','');
 save_back     = getdef(cfg,'save_back',true);
 est_opts      = getdef(cfg,'est_opts', struct('method','anchored','interp_method','rb_rbf', ...
                        'min_mics_fit',5,'anchor_win_deg',40,'grid_step_deg',1));
+% Zone 2 (inside_y / "maze pre-junction") only has 4 candidate mics, below the
+% global min_mics_fit=5, so it always fell back to peak-mic. Allow a LOWER
+% min_mics_fit for zone 2 ONLY so those calls can still attempt interpolation.
+% Other zones keep est_opts.min_mics_fit. Set cfg.min_mics_fit_zone2 to tune.
+min_mics_fit_zone2 = getdef(cfg,'min_mics_fit_zone2',4);
 
 bpp = load(bp_proc_file);
 
@@ -61,6 +62,14 @@ zones = build_maze_zones(maze);
 mic_num_of_col = local_mic_numbers(bpp.mic_names);          % 1 x num_mics
 valid_col      = ~isnan(mic_num_of_col) & ~isnan(bpp.mic_loc(:,1))';
 all_mic_nums   = mic_num_of_col(valid_col);
+
+% mic-selection mode: 'zone' (static per-zone INCLUDE/EXCLUDE lists) or
+% 'lineofsight' (geometry: keep mics whose straight path to the bat doesn't cross
+% a maze wall). Line-of-sight fixes cases where the zone list excludes visible
+% mics that actually see the forward beam (e.g. a bat below the exits).
+mic_select  = getdef(cfg,'mic_select','zone');
+mics_xy_mm  = bpp.mic_loc(valid_col,1:2) * 1000;    % mm, same order as all_mic_nums
+maze_walls  = {zones.wallR, zones.wallL};
 
 %% --- pick dB field + frequency vectors ---
 db_field = local_pick_db_field(bpp.proc, db_field);
@@ -104,7 +113,12 @@ for iC = 1:num_calls
     bat_maze_xy = bpp.proc.bat_loc_at_call(iC,1:2) * 1000;   % m -> mm (maze frame)
     if any(~isfinite(bat_maze_xy)), continue; end
 
-    [sel_mic_nums, zid] = select_mics_by_position(bat_maze_xy, zones, all_mic_nums);
+    if strcmpi(mic_select,'lineofsight')
+        sel_mic_nums = select_mics_lineofsight(bat_maze_xy, mics_xy_mm, all_mic_nums, maze_walls);
+        [~, zid]     = select_mics_by_position(bat_maze_xy, zones, all_mic_nums);   % zone id: reporting only
+    else
+        [sel_mic_nums, zid] = select_mics_by_position(bat_maze_xy, zones, all_mic_nums);
+    end
     beam_zone_id(iC) = zid;
     if isempty(sel_mic_nums), continue; end
     sel_cols = find(ismember(mic_num_of_col, sel_mic_nums));
@@ -123,16 +137,23 @@ for iC = 1:num_calls
 
     %% 3) beam-aim estimate = head-direction proxy (room frame, from bat_loc_at_call)
     bat_beam_xyz = bpp.proc.bat_loc_at_call(iC,:);          % metres, mic_loc frame
+    est_opts_c = est_opts;                                   % per-call options
+    if zid == 2                                              % zone 2 only: lower threshold
+        est_opts_c.min_mics_fit = min_mics_fit_zone2;
+    end
     bd = estimate_beam_direction(bpp.mic_loc(sel_cols,:), bat_beam_xyz, ...
-                                 call_dB(sel_cols)', est_opts);
+                                 call_dB(sel_cols)', est_opts_c);
 
     beam_aim_deg(iC,:)  = [bd.az_deg, bd.el_deg];
     beam_sigma(iC)      = bd.sigma_deg;
     beam_peak_deg(iC,:) = [bd.peak_az_deg, bd.peak_el_deg];
     switch bd.method
-        case 'interp', beam_method(iC) = 1;
-        case 'peak',   beam_method(iC) = 2;
-        otherwise,     beam_method(iC) = 0;
+        case {'anchored','midline','peak2d','interp'}
+            beam_method(iC) = 1;   % continuous interpolation-based estimate
+        case 'peak'
+            beam_method(iC) = 2;   % too few mics -> loudest-mic fallback
+        otherwise
+            beam_method(iC) = 0;   % 'none' -> no estimate at all
     end
 
     % which selected mic was loudest (for auditing) -> its mic NUMBER

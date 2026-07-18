@@ -76,7 +76,7 @@ zones.exit_p1   = LW(3,1:2);  zones.exit_p2   = RW(3,1:2);   % exit points (plot
 % ---- default mic sets (mic NUMBERS) and INCLUDE/EXCLUDE modes ----
 def.approach   = [1 17 4 20 32];                 mode.approach   = 'EXCLUDE';
 def.inside_y   = [2 3 18 19];                     mode.inside_y   = 'INCLUDE';
-def.past_y     = [1 2 3 4 17 18 19 20 32];        mode.past_y     = 'INCLUDE';
+def.past_y     = [1 2 3 4 5 6 15 16 17 18 19 20 21 31 32];        mode.past_y     = 'INCLUDE';
 def.arm_pink   = [31 16 11 29 13 28 27];          mode.arm_pink   = 'EXCLUDE';   % -X arm
 def.arm_purple = [6 21 7 5 10 24 8 2 26];         mode.arm_purple = 'EXCLUDE';   % +X arm
 

@@ -12,5 +12,6 @@ addpath(root);
 addpath(genpath(fullfile(root,'1_preprocessing')));
 addpath(genpath(fullfile(root,'2_mic_selection')));
 addpath(genpath(fullfile(root,'3_beam_direction')));
+addpath(fullfile(root,'4_trial_analysis'));
 fprintf('Beam-pattern pipeline paths added (%s).\n', root);
 end

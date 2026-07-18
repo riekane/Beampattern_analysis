@@ -14,7 +14,8 @@ function plot_mic_selection_qc(bat_pos_file, mic_pos_file, save_png)
 % INPUT
 %   bat_pos_file - a bat_pos.mat from the position pipeline (embeds .maze).
 %   mic_pos_file - (optional) mic_pos_<date>.mat or .csv (to plot mics).
-%   save_png     - (optional) path to save a PNG; '' = don't save (default).
+%   save_png     - (optional) '' (default) = auto-save into <out_root>\<batID>\plot;
+%                  'none' = don't save; a folder or full path = save there.
 
 if nargin < 2, mic_pos_file = ''; end
 if nargin < 3, save_png = ''; end
@@ -66,10 +67,20 @@ plot(maze.right_wall(:,1), maze.right_wall(:,2), '-o','Color','k','LineWidth',2.
 % ---- trajectory ----
 plot(track(:,1),track(:,2),'-','Color','k','LineWidth',0.8,'DisplayName','bat path');
 
-% ---- take-off perch ----
-if isfield(maze,'takeoff_perch') && ~isempty(maze.takeoff_perch)
-    scatter(maze.takeoff_perch(1),maze.takeoff_perch(2),260,'p', ...
+% ---- perches (take-off = gold star, landing = cyan diamond) ----
+% Prefer the JSON-labelled maze perch; fall back to the Vicon-tracked position.
+tp = []; lp = [];
+if isfield(maze,'takeoff_perch') && ~isempty(maze.takeoff_perch), tp = maze.takeoff_perch;
+elseif isfield(bp,'tp_position') && ~isempty(bp.tp_position),      tp = bp.tp_position; end
+if isfield(maze,'landing_perch') && ~isempty(maze.landing_perch),  lp = maze.landing_perch;
+elseif isfield(bp,'lp_position') && ~isempty(bp.lp_position),      lp = bp.lp_position; end
+if ~isempty(tp)
+    scatter(tp(1),tp(2),260,'p', ...
             'MarkerFaceColor',[1 .84 0],'MarkerEdgeColor','k','DisplayName','take-off perch');
+end
+if ~isempty(lp)
+    scatter(lp(1),lp(2),320,'d', ...
+            'MarkerFaceColor',[0 .70 .90],'MarkerEdgeColor','k','DisplayName','landing perch');
 end
 
 % ---- mics ----
@@ -100,7 +111,26 @@ fprintf('Frames per zone:');
 for z = 1:5, fprintf('  %s=%d', names{z}, sum(zid==z)); end
 fprintf('  (no-track=%d)\n', sum(zid==0));
 
-if ~isempty(save_png)
+% ---- save the maze/zoning QC into the bat's \plot folder ----
+% Default (save_png=''): auto-save to <out_root>\<batID>\plot, matching where
+% bp_proc_vicon writes. batID is parsed from the bat_pos file name; the root
+% mirrors bp_proc_vicon's default. Pass 'none' to skip, or an explicit
+% path/folder to control it.
+if ~strcmpi(save_png,'none')
+    if isempty(save_png)
+        out_root = 'Z:\Rie\Data\Beampattern_proc';        % same default as bp_proc_vicon
+        [~,bpn]  = fileparts(bat_pos_file);
+        tok      = regexp(bpn,'^([^_]+)','tokens','once'); % batID = first token
+        bat_id   = ''; if ~isempty(tok), bat_id = tok{1}; end
+        base     = regexprep(bpn,'_bat_pos$','');          % e.g. batA125_20260709_02
+        save_png = fullfile(out_root, bat_id, 'plot', [base '_mic_selection_qc.png']);
+    elseif isfolder(save_png)                              % a folder was given -> auto filename
+        [~,bpn]  = fileparts(bat_pos_file);
+        base     = regexprep(bpn,'_bat_pos$','');
+        save_png = fullfile(save_png, [base '_mic_selection_qc.png']);
+    end
+    pdir = fileparts(save_png);
+    if ~isempty(pdir) && ~isfolder(pdir), mkdir(pdir); end
     saveas(gcf, save_png); fprintf('Saved %s\n', save_png);
 end
 end

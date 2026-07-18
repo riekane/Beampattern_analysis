@@ -64,7 +64,21 @@ for iC = 1:proc_call_num
       call_template_len_pt = length(call_template);
       CT(1); %will fail if empty and push it to the catch statement
     catch
-      fprintf('Call duration marking is problematic in Call #%d\n',data.mic_data.call_idx_w_track(iC));
+      % --- diagnose WHY the template slice failed ---
+      win_len = size(call_long,1);   % length of the extracted snippet window
+      if sidx_in_long > eidx_in_long
+        why = sprintf('start>=end (reversed/zero-length marks: s=%d e=%d)', ...
+                      sidx_in_long, eidx_in_long);
+      elseif sidx_in_long < 1
+        why = sprintf('marked start is %d pt(s) BEFORE the extraction window', 1-sidx_in_long);
+      elseif eidx_in_long > win_len
+        why = sprintf('marked end is %d pt(s) AFTER the extraction window (win=%d pt)', ...
+                      eidx_in_long-win_len, win_len);
+      else
+        why = 'empty/invalid template for another reason';
+      end
+      fprintf('Call duration marking is problematic in Call #%d  [%s]\n', ...
+              data.mic_data.call_idx_w_track(iC), why);
       % Fake save data ====================================
       data.proc.call_align_short(iC,:) = cell(1,num_ch);
       data.proc.call_align_short_se_idx(iC,:,:) = nan(num_ch,2);
@@ -119,6 +133,12 @@ for iC = 1:proc_call_num
           ch_xcorr_pk_idx_tmp = min(ch_xcorr_pk_idx_tmp);  % take the first arrival in case there is stronger echo
         else  % if very weak signal don't consider second arrival
           [~,ch_xcorr_pk_idx_tmp] = findpeaks(ch_xcorr_env(chk_se_idx,iM),'SortStr','descend','MinPeakDistance',50,'NPeak',1);
+        end
+        if isempty(ch_xcorr_pk_idx_tmp)
+          % findpeaks found no interior peak (correlation max sits at the window
+          % edge, or the channel is flat/very weak). Fall back to the plain argmax
+          % of the envelope in the tolerance window so this channel is still used.
+          [~,ch_xcorr_pk_idx_tmp] = max(ch_xcorr_env(chk_se_idx,iM));
         end
         ch_xcorr_pk_idx_tmp = ch_xcorr_pk_idx_tmp+chk_se_idx(1)-1;
         want_idx = xcorr_lags(ch_xcorr_pk_idx_tmp(1))+[0,call_template_len_pt-1];

@@ -3,10 +3,9 @@ function data = bp_proc_vicon(cfg)
 %
 %   data = BP_PROC_VICON(cfg)
 %
-% Reproduces the Magdiel pipeline's bp_proc.m preprocessing step for Rie's data
 % WITHOUT the GUI/uigetfile front-end and WITHOUT measured microphone
 % calibration. It:
-%   1. loads a parameters template + Rie's own file formats,
+%   1. loads a parameters template,
 %   2. builds the bat track & (marker-free) head aim from a single-marker Vicon
 %      trajectory,
 %   3. synthesises a UNIFORM Knowles-FG calibration (flat sensitivity, omni
@@ -22,10 +21,7 @@ function data = bp_proc_vicon(cfg)
 %
 % See run_bp_proc_vicon.m for the CONFIG block and field documentation.
 %
-% NOTE: written to be faithful to bp_proc.m, but it has NOT been executed here
-% (no MATLAB on the build machine). Run it on one trial and eyeball the result
-% (e.g. with plot_beamaim_qc.m downstream) before batch processing.
-%
+
 % Vicon+Avisoft beam-pattern pipeline, 2026.
 
 % ---- dependencies (self-contained: local lib\ subfolder) ----
@@ -122,10 +118,45 @@ if isempty(out_name)
     [~,b] = fileparts(cfg.detected_file);
     out_name = regexprep(b,'_?detected.*$','');
 end
-if ~isfolder(cfg.out_dir), mkdir(cfg.out_dir); end
-save_name = [out_name '_mic_data_bp_proc.mat'];
-save(fullfile(cfg.out_dir,save_name),'-struct','data','-v7.3');
-fprintf('Saved %s (%d calls with track)\n', fullfile(cfg.out_dir,save_name), nC);
+
+% ---- output folder: Data\Beampattern_proc\<batID>\ , organised per bat ----
+% If cfg.out_dir is given, it is used as-is (back-compat). Otherwise the file is
+% written under a per-bat folder inside a common processed-data root:
+%   <out_root>\<batID>\<out_name>_mic_data_bp_proc.mat
+% batID is taken from cfg.bat_id, else parsed from the bat_pos file name
+% (e.g. 'batA125_20260709_06_bat_pos.mat' -> 'batA125').
+% Layout per bat:  <out_root>\<batID>\beampattern_output\  (the .mat files)
+%                  <out_root>\<batID>\plot\               (QC figures)
+if isfield(cfg,'out_dir') && ~isempty(cfg.out_dir)
+    bat_dir = cfg.out_dir;                          % explicit override: treat as the bat folder
+else
+    if isfield(cfg,'out_root') && ~isempty(cfg.out_root)
+        out_root = cfg.out_root;
+    else
+        out_root = 'Z:\Rie\Data\Beampattern_proc';   % default processed-data root
+    end
+    if isfield(cfg,'bat_id') && ~isempty(cfg.bat_id)
+        bat_id = cfg.bat_id;
+    else
+        [~,bpn] = fileparts(cfg.bat_pos_file);
+        tok = regexp(bpn,'^([^_]+)','tokens','once');   % first token before '_'
+        assert(~isempty(tok), ['Could not parse batID from bat_pos_file name (%s); ' ...
+               'set cfg.bat_id or cfg.out_dir.'], bpn);
+        bat_id = tok{1};
+    end
+    bat_dir = fullfile(out_root, bat_id);
+end
+out_dir  = fullfile(bat_dir, 'beampattern_output');   % .mat outputs
+plot_dir = fullfile(bat_dir, 'plot');                 % QC figures (used by the plot fcns)
+
+if ~isfolder(out_dir),  mkdir(out_dir);  end
+if ~isfolder(plot_dir), mkdir(plot_dir); end
+save_name  = [out_name '_mic_data_bp_proc.mat'];
+saved_file = fullfile(out_dir, save_name);
+data.saved_file = saved_file;                 % record where it went (for downstream)
+data.plot_dir   = plot_dir;                   % where QC plots should be saved
+save(saved_file,'-struct','data','-v7.3');
+fprintf('Saved %s (%d calls with track)\n', saved_file, nC);
 end
 
 %% ======================================================================
@@ -148,22 +179,70 @@ function data = local_load_mic_info(data, cfg, unit_scale)
 end
 
 function data = local_load_calibration(data, cfg)
-% Uniform Knowles-FG assumption unless measured files supplied.
-    nch = size(data.mic_loc,1);
-    nyq = data.mic_data.fs/2;
-    if ~isempty(cfg.mic_sens_file)
-        data.mic_sens = load(cfg.mic_sens_file);               % expects .freq, .sens (Nf x nch)
+% MIC CALIBRATION -- factory-flat default now, measured files later.
+%
+% Until per-mic calibration is measured, all mics are treated as identical
+% Knowles-FG capsules: flat sensitivity (cfg.mic_sens_dB, default 0) and
+% omnidirectional (0 dB) beam pattern. This is fine for BEAM DIRECTION (the
+% identical terms cancel across mics); only absolute SPL is uncalibrated.
+%
+% TO FEED MEASURED CALIBRATION LATER, just set:
+%   cfg.mic_sens_file -> .mat with
+%        freq : (Nf x 1) frequency axis [Hz]
+%        sens : (Nf x M) per-mic sensitivity [dB], columns = mic NUMBER order
+%   cfg.mic_bp_file   -> .mat with
+%        freq : (Nf x 1) [Hz],  theta : (Ntheta x 1) [deg]
+%        bp   : (Nf x Ntheta x M) per-mic beam pattern [dB]
+%
+% M may be the FULL array (e.g. 31/32 mics) or exactly the recorded channel
+% count. If it is the full array, the columns/pages are auto-subset to the
+% channels actually recorded this session (data.mic_channels), so ONE
+% calibration file works for both 24- and 31-channel sessions -- nothing else
+% to change. No file -> factory-flat default below.
+    nch    = size(data.mic_loc,1);                 % recorded channels (already subset)
+    nyq    = data.mic_data.fs/2;
+    ch2mic = data.mic_channels;                    % recorded channel -> mic index
+
+    % ---- sensitivity ----
+    if isfield(cfg,'mic_sens_file') && ~isempty(cfg.mic_sens_file)
+        S = load(cfg.mic_sens_file);               % .freq, .sens
+        assert(isfield(S,'sens') && isfield(S,'freq'), 'mic_sens_file needs .freq and .sens.');
+        S.sens = local_pick_channels(S.sens, 2, nch, ch2mic, 'mic_sens.sens');
+        data.mic_sens = S;
     else
-        f = [0; nyq];                                          % 2-pt flat curve (0..Nyquist)
+        f = [0; nyq];                              % 2-pt flat curve (0..Nyquist)
         data.mic_sens = struct('freq',f, 'sens', cfg.mic_sens_dB*ones(numel(f),nch));
     end
-    if ~isempty(cfg.mic_bp_file)
-        data.mic_bp = load(cfg.mic_bp_file);                   % expects .bp(Nf,Ntheta,nch), .freq, .theta
+
+    % ---- beam pattern ----
+    if isfield(cfg,'mic_bp_file') && ~isempty(cfg.mic_bp_file)
+        B = load(cfg.mic_bp_file);                 % .freq, .theta, .bp
+        assert(all(isfield(B,{'bp','freq','theta'})), 'mic_bp_file needs .freq, .theta and .bp.');
+        B.bp = local_pick_channels(B.bp, 3, nch, ch2mic, 'mic_bp.bp');
+        data.mic_bp = B;
     else
-        theta = (-180:180)';                                   % deg
+        theta = (-180:180)';                       % deg
         f = [0; nyq];
         data.mic_bp = struct('theta',theta, 'freq',f, ...
                              'bp', zeros(numel(f),numel(theta),nch));  % omni -> 0 dB compensation
+    end
+end
+
+function X = local_pick_channels(X, dim, nch, ch2mic, name)
+% Align a per-mic calibration array to the recorded channels along dimension
+% `dim`. Accept an array already sized to nch (use as-is), or a full-array
+% calibration indexed by mic number (subset by ch2mic).
+    n = size(X, dim);
+    if n == nch
+        return;                                    % already per recorded channel
+    elseif n >= max(ch2mic)
+        idx = repmat({':'}, 1, ndims(X));
+        idx{dim} = ch2mic;                         % subset full array -> recorded channels
+        X = X(idx{:});
+    else
+        error(['%s has %d entries along dim %d, but the session recorded %d channels ' ...
+               '(max mic index %d). Provide calibration for the full array or the ' ...
+               'recorded channels.'], name, n, dim, nch, max(ch2mic));
     end
 end
 
@@ -177,7 +256,26 @@ function data = local_load_bat_pos(data, cfg, unit_scale)
     ao = data.param.axis_orient;
     pos = pos(:,ao) * unit_scale;                              % metres
     data.track.fs = double(B.frame_rate);
+
+    % Trim the Vicon tail to match the Avisoft recording length, so the END
+    % alignment (Vicon last frame <-> Avisoft last sample, both built via
+    % -fliplr) is correct. Keep the first round(cfg.vicon_dur_s * frame_rate)
+    % frames (default 16 s -> 4000 @ 250 Hz). Set cfg.vicon_dur_s = Inf to disable.
+    vdur = 16;
+    if isfield(cfg,'vicon_dur_s') && ~isempty(cfg.vicon_dur_s), vdur = cfg.vicon_dur_s; end
+    if isfinite(vdur)
+        nkeep = round(vdur * data.track.fs);
+        if size(pos,1) > nkeep
+            fprintf('Trimming Vicon track %d -> %d frames (%.2f s) to match Avisoft.\n', ...
+                    size(pos,1), nkeep, vdur);
+            pos = pos(1:nkeep, :);
+        end
+    end
     if isfield(B,'maze'), data.maze = B.maze; end             % carried for run_beamaim_maze zones
+    % Vicon-tracked perch positions (mm) -> carried through for QC plots, used
+    % as a fallback when the JSON layout has no labelled perch.
+    if isfield(B,'tp_position'), data.tp_position = B.tp_position; end  % take-off perch
+    if isfield(B,'lp_position'), data.lp_position = B.lp_position; end  % landing perch
 
     sm_len   = data.track.smooth_len;
     diff_len = round(data.track.head_aim_est_time_diff*data.track.fs/1e3);
@@ -229,11 +327,51 @@ function data = local_load_mic_data(data, cfg)
     mic_data.sig_t = -fliplr(0:size(mic_data.sig,1)-1)/mic_data.fs;
     data.mic_data = mic_data;
 
-    assert(data.mic_data.num_ch_in_file==size(data.mic_loc,1), ...
-        ['Channel/mic mismatch: recording has %d channels but mic_pos has %d mics. ' ...
-         'Align channel order to mic_loc rows (and mic_names) before running.'], ...
-        data.mic_data.num_ch_in_file, size(data.mic_loc,1));
+    % ---- channel <-> mic mapping (allow fewer channels than mics) ----
+    % Rie's rig wires mic1->ch1, mic2->ch2, ... so recording channel k is
+    % simply row k of mic_loc. Some sessions record all 31 mics, others only
+    % the first 24; in the short case we just drop the unrecorded mic rows so
+    % every per-mic array matches the number of channels actually present.
+    % An explicit order can be forced with cfg.mic_channels (a vector of
+    % mic_loc row indices, one entry per recorded channel) if the wiring ever
+    % differs from the default 1:1.
+    nch  = data.mic_data.num_ch_in_file;
+    nmic = size(data.mic_loc,1);
+    if isfield(cfg,'mic_channels') && ~isempty(cfg.mic_channels)
+        ch2mic = cfg.mic_channels(:)';
+        assert(numel(ch2mic)==nch, ...
+            'cfg.mic_channels has %d entries but recording has %d channels.', ...
+            numel(ch2mic), nch);
+        assert(all(ch2mic>=1 & ch2mic<=nmic), ...
+            'cfg.mic_channels indexes outside 1..%d (available mics).', nmic);
+    else
+        assert(nch<=nmic, ...
+            ['Recording has %d channels but mic_pos only has %d mics -- cannot ' ...
+             'map more channels than mics. Check mic_pos_file / channel count.'], ...
+            nch, nmic);
+        ch2mic = 1:nch;                      % channel k -> mic_loc row k
+    end
+    data.mic_channels = ch2mic;              % recorded channel -> mic (row) index; used to
+                                             % subset per-mic calibration to the recorded set
+    if ~isequal(ch2mic, 1:nmic)
+        % subset (and, if cfg.mic_channels given, reorder) every per-mic array
+        data.mic_loc   = data.mic_loc(ch2mic,:);
+        data.mic_vec   = data.mic_vec(ch2mic,:);
+        data.mic_vh    = data.mic_vh(ch2mic,:);
+        data.mic_gain  = data.mic_gain(ch2mic);
+        data.mic_names = data.mic_names(ch2mic);
+        fprintf('Channel/mic map: using %d of %d mics (mic rows [%s]).\n', ...
+                nch, nmic, num2str(ch2mic));
+    end
 
+    % Optional override of the extraction-window length (ms). The window is
+    % centred on the predicted acoustic arrival at each mic; when the bat
+    % position / Vicon-Avisoft timing is a few ms off, the marked call can fall
+    % outside a short window (-> "Call duration marking is problematic"). A
+    % longer window tolerates that offset so the call is still captured.
+    if isfield(cfg,'extract_call_len_ms') && ~isempty(cfg.extract_call_len_ms)
+        data.param.extract_call_len = cfg.extract_call_len_ms;
+    end
     data.param.extract_call_len_pt  = round(data.param.extract_call_len*1e-3*data.mic_data.fs);
     data.param.extract_call_len_idx = -round((data.param.extract_call_len_pt+1)/2) + ...
                                        (1:data.param.extract_call_len_pt);
