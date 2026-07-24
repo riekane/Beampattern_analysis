@@ -3,10 +3,11 @@ function out = run_beamaim_maze(cfg)
 %
 %   out = RUN_BEAMAIM_MAZE(cfg)
 %
-% Keeps the maze-aware microphone selection (build_maze_zones +
-% select_mics_by_position) but replaces the crude "peak-intensity mic" direction
-% with the interpolation + Gaussian-fit beam-aim estimate ported from beam_aim.m
-% (see estimate_beam_direction.m).
+% Per call it selects the microphones that can see the bat (line-of-sight by
+% default; see cfg.mic_select), then replaces the crude "peak-intensity mic"
+% direction with the interpolation + Gaussian-fit beam-aim estimate ported from
+% beam_aim.m (see estimate_beam_direction.m). The maze zone is still classified
+% per call, but only as a trial-level region label (reporting + a zone-2 tweak).
 %
 %
 % cfg FIELDS
@@ -25,6 +26,11 @@ function out = run_beamaim_maze(cfg)
 %   .db_field      - '' to auto-pick a compensated dB field, or a name. (default '')
 %   .save_back     - write results back into bp_proc_file.          (default true)
 %   .est_opts      - options struct for estimate_beam_direction.m.  (default anchored)
+%   .mic_select    - per-call mic selection: 'lineofsight' (geometry: keep mics
+%                    whose straight path to the bat doesn't cross a maze wall) or
+%                    'zone' (static per-zone lists).      (default 'lineofsight')
+%   .min_mics_fit_zone2 - lower min_mics_fit for zone-2 calls only (the stem has
+%                    few candidate mics) so they can still interpolate. (default 4)
 %
 % OUTPUT struct `out` (and, if save_back, saved into bp_proc_file):
 %   .beam_aim_az_el_deg  calls x 2  HEAD-AIM PROXY azimuth/elevation (deg)
@@ -63,11 +69,14 @@ mic_num_of_col = local_mic_numbers(bpp.mic_names);          % 1 x num_mics
 valid_col      = ~isnan(mic_num_of_col) & ~isnan(bpp.mic_loc(:,1))';
 all_mic_nums   = mic_num_of_col(valid_col);
 
-% mic-selection mode: 'zone' (static per-zone INCLUDE/EXCLUDE lists) or
-% 'lineofsight' (geometry: keep mics whose straight path to the bat doesn't cross
-% a maze wall). Line-of-sight fixes cases where the zone list excludes visible
-% mics that actually see the forward beam (e.g. a bat below the exits).
-mic_select  = getdef(cfg,'mic_select','zone');
+% mic-selection mode. DEFAULT 'lineofsight' (geometry: keep mics whose straight
+% path to the bat doesn't cross a maze wall) -- this is the per-call microphone
+% filter. 'zone' instead uses the static per-zone INCLUDE/EXCLUDE lists.
+% Line-of-sight is the default because the zone lists can exclude mics that
+% actually see the forward beam (e.g. a bat below the exits). The maze zone is
+% still classified for every call, but as a trial-level region label (reporting
+% + the zone-2 fit tweak below), NOT as the mic selector.
+mic_select  = getdef(cfg,'mic_select','lineofsight');
 mics_xy_mm  = bpp.mic_loc(valid_col,1:2) * 1000;    % mm, same order as all_mic_nums
 maze_walls  = {zones.wallR, zones.wallL};
 
@@ -176,7 +185,28 @@ if save_back
     bpp.proc.beam_zone_id        = beam_zone_id;
     bpp.proc.beam_sel_mic_num    = beam_sel_mic;
     bpp.proc.beam_n_mics_used    = beam_n_used;
-    save(bp_proc_file,'-struct','bpp');
+    % Update ONLY the proc variable, in place (-append), instead of rewriting the
+    % whole ~100 MB file: faster, and it avoids the full-file truncate that was
+    % intermittently blocked ('permission denied') when a background process
+    % (AV / sync / indexer) briefly held the freshly-written file on the Z: share.
+    % (-append was verified to succeed on a file whose full overwrite failed.)
+    % Retry a few times to ride out any transient lock.
+    proc = bpp.proc; %#ok<NASGU>
+    saved = false; lastErr = '';
+    for attempt = 1:5
+        try
+            save(bp_proc_file,'proc','-append');
+            saved = true; break;
+        catch ME
+            lastErr = ME.message;
+            fprintf(2,'  beam-aim save attempt %d/5 failed (%s); retrying in 2 s...\n', attempt, lastErr);
+            pause(2);
+        end
+    end
+    if ~saved
+        error('run_beamaim_maze:saveFailed', ...
+              'Could not write beam-aim back to %s after 5 attempts: %s', bp_proc_file, lastErr);
+    end
     fprintf('Saved beam-aim (%d calls) back to %s\n', num_calls, bp_proc_file);
 end
 

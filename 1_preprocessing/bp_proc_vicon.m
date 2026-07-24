@@ -153,6 +153,9 @@ if ~isfolder(out_dir),  mkdir(out_dir);  end
 if ~isfolder(plot_dir), mkdir(plot_dir); end
 save_name  = [out_name '_mic_data_bp_proc.mat'];
 saved_file = fullfile(out_dir, save_name);
+% ---- take-off-centred coordinate frame: adds data.takeoff_centered.* (raw kept) ----
+data = add_takeoff_centered_coords(data);
+
 data.saved_file = saved_file;                 % record where it went (for downstream)
 data.plot_dir   = plot_dir;                   % where QC plots should be saved
 save(saved_file,'-struct','data','-v7.3');
@@ -263,11 +266,14 @@ function data = local_load_bat_pos(data, cfg, unit_scale)
     % frames (default 16 s -> 4000 @ 250 Hz). Set cfg.vicon_dur_s = Inf to disable.
     vdur = 16;
     if isfield(cfg,'vicon_dur_s') && ~isempty(cfg.vicon_dur_s), vdur = cfg.vicon_dur_s; end
+    pos_full   = pos;                 % untrimmed track (m) -> used for the landing tail
+    track_tail = [];
     if isfinite(vdur)
         nkeep = round(vdur * data.track.fs);
         if size(pos,1) > nkeep
             fprintf('Trimming Vicon track %d -> %d frames (%.2f s) to match Avisoft.\n', ...
                     size(pos,1), nkeep, vdur);
+            track_tail = pos_full(nkeep:end, :);   % last kept frame + post-TTL landing tail (m)
             pos = pos(1:nkeep, :);
         end
     end
@@ -276,6 +282,7 @@ function data = local_load_bat_pos(data, cfg, unit_scale)
     % as a fallback when the JSON layout has no labelled perch.
     if isfield(B,'tp_position'), data.tp_position = B.tp_position; end  % take-off perch
     if isfield(B,'lp_position'), data.lp_position = B.lp_position; end  % landing perch
+    if isfield(B,'perch_pos'),   data.perch_pos   = B.perch_pos;   end  % ALL perches (multi landing)
 
     sm_len   = data.track.smooth_len;
     diff_len = round(data.track.head_aim_est_time_diff*data.track.fs/1e3);
@@ -308,6 +315,7 @@ function data = local_load_bat_pos(data, cfg, unit_scale)
     data.track.track_smooth      = track_sm;
     data.track.track_interp      = track_int;
     data.track.track_interp_time = track_int_t;
+    data.track.track_tail        = track_tail;               % post-TTL landing tail (m), for QC
     data.track.marker_indicator  = zeros(size(track_int,1),1);   % 0 = head aim from track
     data.head_aim.head_aim_smooth   = head_aim;
     data.head_aim.head_aim_int      = head_aim_int;
@@ -337,32 +345,82 @@ function data = local_load_mic_data(data, cfg)
     % differs from the default 1:1.
     nch  = data.mic_data.num_ch_in_file;
     nmic = size(data.mic_loc,1);
+
+    % Rig mic numbering: 31 physical mics numbered 1..29, 31, 32 (there is NO
+    % Mic_30). Recording channel k is wired to the k-th mic in THIS order, so
+    % channel 1..29 -> Mic_1..29, channel 30 -> Mic_31, channel 31 -> Mic_32.
+    % (Edit CANON here if the rig's mic set ever changes.)
+    canon = [1:29, 31, 32];
+
     if isfield(cfg,'mic_channels') && ~isempty(cfg.mic_channels)
+        % explicit override: channel k -> mic_loc ROW cfg.mic_channels(k)
         ch2mic = cfg.mic_channels(:)';
         assert(numel(ch2mic)==nch, ...
             'cfg.mic_channels has %d entries but recording has %d channels.', ...
             numel(ch2mic), nch);
         assert(all(ch2mic>=1 & ch2mic<=nmic), ...
             'cfg.mic_channels indexes outside 1..%d (available mics).', nmic);
+        map_by_number = false;
     else
-        assert(nch<=nmic, ...
-            ['Recording has %d channels but mic_pos only has %d mics -- cannot ' ...
-             'map more channels than mics. Check mic_pos_file / channel count.'], ...
-            nch, nmic);
-        ch2mic = 1:nch;                      % channel k -> mic_loc row k
+        % DEFAULT: map channel k -> the mic_loc row whose MIC NUMBER is canon(k),
+        % parsed from mic_names -- NOT the row's position in the file. A mic that
+        % is MISSING from mic_pos that day (its landmark was not labelled/solved)
+        % then leaves a NaN gap for its OWN channel instead of shifting every
+        % later channel onto the next mic's location (the old 1:nch bug that
+        % scrambled 20260703 / 20260720).
+        assert(nch<=numel(canon), ...
+            'Recording has %d channels but the rig only defines %d mics.', nch, numel(canon));
+        mic_num = nan(1,nmic);
+        for i = 1:nmic
+            tok = regexp(char(data.mic_names{i}), '(\d+)', 'tokens', 'once');
+            if ~isempty(tok), mic_num(i) = str2double(tok{1}); else, mic_num(i) = i; end
+        end
+        ch2mic = nan(1,nch);
+        for k = 1:nch
+            r = find(mic_num==canon(k), 1);
+            if ~isempty(r), ch2mic(k) = r; end
+        end
+        map_by_number = true;
+        miss = find(isnan(ch2mic));
+        if ~isempty(miss)
+            fprintf(['Channel/mic map: channel(s) [%s] (Mic_[%s]) have no position in ' ...
+                     'mic_pos -- set to NaN so the other mics keep their true ' ...
+                     'positions. Label/solve that mic in the landmark file if it ' ...
+                     'should exist.\n'], num2str(miss), num2str(canon(miss)));
+        end
     end
-    data.mic_channels = ch2mic;              % recorded channel -> mic (row) index; used to
-                                             % subset per-mic calibration to the recorded set
-    if ~isequal(ch2mic, 1:nmic)
-        % subset (and, if cfg.mic_channels given, reorder) every per-mic array
-        data.mic_loc   = data.mic_loc(ch2mic,:);
-        data.mic_vec   = data.mic_vec(ch2mic,:);
-        data.mic_vh    = data.mic_vh(ch2mic,:);
-        data.mic_gain  = data.mic_gain(ch2mic);
-        data.mic_names = data.mic_names(ch2mic);
-        fprintf('Channel/mic map: using %d of %d mics (mic rows [%s]).\n', ...
-                nch, nmic, num2str(ch2mic));
+    data.mic_channels = ch2mic;   % recorded channel -> mic row (NaN = no mic for that channel)
+    % NOTE: with a missing mic, mic_channels now contains NaN. That is fine for
+    % the beam pipeline (estimate_beam_direction / run_beamaim_maze already drop
+    % NaN-position mics). If per-mic CALIBRATION files are ever wired in
+    % (local_load_calibration), make its subsetting skip NaN channels.
+
+    % Rebuild every per-mic array with exactly ONE ROW PER RECORDED CHANNEL, in
+    % channel order, NaN-filling any channel that has no mic. This guarantees
+    % row k == channel k, so a missing mic can never renumber the others.
+    have = ~isnan(ch2mic);
+    src  = ch2mic(have);
+    new_loc  = nan(nch,3);
+    new_vec  = nan(nch,3);
+    new_vh   = nan(nch,3);
+    new_gain = zeros(nch,1);
+    if map_by_number
+        new_names = arrayfun(@(k) sprintf('Mic_%d',canon(k)), (1:nch)', 'UniformOutput', false);
+    else
+        new_names = arrayfun(@(k) sprintf('Mic_%d',k),        (1:nch)', 'UniformOutput', false);
     end
+    new_loc(have,:) = data.mic_loc(src,:);
+    new_vec(have,:) = data.mic_vec(src,:);
+    new_vh(have,:)  = data.mic_vh(src,:);
+    new_gain(have)  = data.mic_gain(src);
+    nm = data.mic_names(src); new_names(have) = nm(:);
+    data.mic_loc   = new_loc;
+    data.mic_vec   = new_vec;
+    data.mic_vh    = new_vh;
+    data.mic_gain  = new_gain;
+    data.mic_names = new_names;
+    fprintf('Channel/mic map: %d channel(s); %d located, %d NaN (missing mic).\n', ...
+            nch, sum(have), sum(~have));
 
     % Optional override of the extraction-window length (ms). The window is
     % centred on the predicted acoustic arrival at each mic; when the bat

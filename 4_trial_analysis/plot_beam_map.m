@@ -64,54 +64,61 @@ nLP = size(LP,1);
 
 fig = figure('Visible',vis,'Position',[80 80 1180 540],'Color','w');
 
-% =================== PANEL A : top-down map ===================
+% =================== PANEL A : top-down map (take-off-centred) ===================
+% Draw the map in the take-off-centred frame: 180 deg about the take-off perch
+% (x'=tpx-x, y'=tpy-y) so take-off -> (0,0) and deeper-in-maze -> +Y; beam-ray
+% azimuths get +180 to match. Panel B (below) stays raw -- its decision axis is
+% orientation-independent.
+tpx0 = tp(1); tpy0 = tp(2);
+Lx = @(X) tpx0 - X;  Ly = @(Y) tpy0 - Y;
 axA = subplot(1,2,1); hold(axA,'on'); axis(axA,'equal');
 if ~isempty(maze)
-    if isfield(maze,'left_wall'),  plot(axA, maze.left_wall(:,1),  maze.left_wall(:,2),  'k-','LineWidth',1.6); end
-    if isfield(maze,'right_wall'), plot(axA, maze.right_wall(:,1), maze.right_wall(:,2), 'k-','LineWidth',1.6); end
-    if isfield(maze,'start_line'), plot(axA, maze.start_line(:,1), maze.start_line(:,2), 'k:','LineWidth',1.0); end
+    if isfield(maze,'left_wall'),  plot(axA, Lx(maze.left_wall(:,1)),  Ly(maze.left_wall(:,2)),  'k-','LineWidth',1.6); end
+    if isfield(maze,'right_wall'), plot(axA, Lx(maze.right_wall(:,1)), Ly(maze.right_wall(:,2)), 'k-','LineWidth',1.6); end
+    if isfield(maze,'start_line'), plot(axA, Lx(maze.start_line(:,1)), Ly(maze.start_line(:,2)), 'k:','LineWidth',1.0); end
 end
 if ~isempty(traj)
-    plot(axA, traj(:,1), traj(:,2), '-', 'Color',[.8 .8 .85],'LineWidth',1);
+    plot(axA, Lx(traj(:,1)), Ly(traj(:,2)), '-', 'Color',[.8 .8 .85],'LineWidth',1);
 end
 if ~isempty(mic_xy)
-    plot(axA, mic_xy(:,1), mic_xy(:,2), '^', 'Color',[.55 .55 .55], ...
+    plot(axA, Lx(mic_xy(:,1)), Ly(mic_xy(:,2)), '^', 'Color',[.55 .55 .55], ...
         'MarkerSize',4,'MarkerFaceColor',[.88 .88 .88]);
     if ~isempty(mic_num)
         for i = 1:size(mic_xy,1)
-            text(axA, mic_xy(i,1)+35, mic_xy(i,2), sprintf('%d',mic_num(i)), ...
+            text(axA, Lx(mic_xy(i,1))+35, Ly(mic_xy(i,2)), sprintf('%d',mic_num(i)), ...
                 'Color',[.6 .6 .6],'FontSize',6);
         end
     end
 end
 % perches
-plot(axA, tp(1), tp(2), 'ks','MarkerSize',11,'MarkerFaceColor',[1 .85 .2],'LineWidth',1);
-text(axA, tp(1)+60, tp(2), 'take-off','FontSize',8);
+plot(axA, Lx(tp(1)), Ly(tp(2)), 'ks','MarkerSize',11,'MarkerFaceColor',[1 .85 .2],'LineWidth',1);
+text(axA, Lx(tp(1))+60, Ly(tp(2)), 'take-off','FontSize',8);
 for k = 1:nLP
-    plot(axA, LP(k,1), LP(k,2), 'p','MarkerSize',16, ...
+    plot(axA, Lx(LP(k,1)), Ly(LP(k,2)), 'p','MarkerSize',16, ...
         'MarkerFaceColor',[.3 .8 .45],'MarkerEdgeColor','k');
-    text(axA, LP(k,1)+60, LP(k,2), sprintf('landing %d',k),'FontSize',8);
+    text(axA, Lx(LP(k,1))+60, Ly(LP(k,2)), sprintf('landing %d',k),'FontSize',8);
 end
-% goal line take-off -> perch 1 (reference "forward")
-gb = atan2(LP(1,2)-tp(2), LP(1,1)-tp(1));
-plot(axA, [tp(1) tp(1)+2*ray_len*cos(gb)], [tp(2) tp(2)+2*ray_len*sin(gb)], ...
+% goal line take-off -> perch 1 (reference "forward"), drawn in the display frame
+gb  = atan2(LP(1,2)-tp(2), LP(1,1)-tp(1));                            % raw goal bearing (title)
+gbA = atan2(Ly(LP(1,2))-Ly(tp(2)), Lx(LP(1,1))-Lx(tp(1)));           % same line, display frame
+plot(axA, [Lx(tp(1)) Lx(tp(1))+2*ray_len*cos(gbA)], [Ly(tp(2)) Ly(tp(2))+2*ray_len*sin(gbA)], ...
     '--','Color',[.3 .8 .45],'LineWidth',1);
-% beam rays coloured by time-before-take-off
+% beam rays coloured by time-before-take-off (azimuth +180 for the display frame)
 cmap = parula(256);
 cmn = min(tb); cmx = max(tb);
 for i = 1:numel(bx)
-    a  = az(i)*pi/180;
+    a  = (az(i)+180)*pi/180;
     if cmx > cmn, f = (tb(i)-cmn)/(cmx-cmn); else, f = 0.5; end
     col = cmap(min(max(round(1+255*f),1),256),:);
-    plot(axA, [bx(i) bx(i)+ray_len*cos(a)], [by(i) by(i)+ray_len*sin(a)], ...
+    plot(axA, [Lx(bx(i)) Lx(bx(i))+ray_len*cos(a)], [Ly(by(i)) Ly(by(i))+ray_len*sin(a)], ...
         '-','Color',col,'LineWidth',1);
-    plot(axA, bx(i), by(i), '.','Color',col,'MarkerSize',7);
+    plot(axA, Lx(bx(i)), Ly(by(i)), '.','Color',col,'MarkerSize',7);
 end
 colormap(axA, cmap);
 if cmx > cmn, set(axA,'CLim',[cmn cmx]); end
 cb = colorbar(axA); ylabel(cb,'time before take-off (s)');
 grid(axA,'on'); box(axA,'on');
-xlabel(axA,'X (mm)   (+X = left arm)'); ylabel(axA,'Y (mm)');
+xlabel(axA,'X (mm)   (take-off-centred; +X = right arm)'); ylabel(axA,'Y (mm)   (+Y = deeper)');
 title(axA, sprintf('%s   beam rays (n=%d)   goal bearing = %.0f\\circ', ...
     tag, numel(bx), gb*180/pi), 'Interpreter','tex');
 

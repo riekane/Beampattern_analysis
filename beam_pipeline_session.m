@@ -3,6 +3,12 @@
 %   stage 1 bp_proc_vicon -> stage 2+3 run_beamaim_maze -> QC plots -> stage 4
 % for EVERY trial in one session (one batID + one date), instead of one trial.
 %
+% 2026-07-22: stage 4 (trial analysis) and the pooled pre-flight figure are now
+% COMMENTED OUT here -- trial-level analysis moved to trial_analysis_batch_processing.m
+% (reads the bp_proc files this script produces; writes one output set PER TRIAL
+% into Z:\Rie\Data\Beampattern_proc\<batID>\trial_analysis\<date>\). To re-enable
+% the old in-line stage 4, un-comment the two %{ ... %} blocks below.
+%
 % TRIAL DISCOVERY (hands-off "whole session"):
 %   Scans the position pipeline's Bat_Position folder for this session's bat_pos
 %   files (<batID>_<date>_<NN>_bat_pos.mat) and processes each. A trial's
@@ -32,12 +38,12 @@ setup_paths
 
 %% ============================ CONFIG (EDIT ME) ============================
 batID     = 'batA125';
-date_data = '20260709';
+date_data = '20260710';
 
 % -- which stages to run per trial --
 do_stage1  = true;   % stage 1  bp_proc_vicon (per-mic distance-compensated levels)
 do_stage23 = true;   % stage 2+3 run_beamaim_maze (line-of-sight mic selection)
-do_stage4  = true;   % stage 4  run_trial_analysis (trial metrics + study tables)
+% do_stage4  = true;   % stage 4 MOVED OUT -> trial_analysis_batch_processing.m
 make_plots = true;   % per-trial QC plots (saved to disk, then figures closed)
 
 % -- position-pipeline inputs (where position_processing writes) --
@@ -48,12 +54,12 @@ mic_pos_dir = 'Z:\Rie\Analysis\position_processing\Mic_positions';
 %    (defaults follow beam_pipeline_one_trial.m's example paths -- confirm them.)
 combined_dir = 'Z:\Rie\Data\Raw_Data\<batID>\<date>\Mic_data\Combined_trial_data';
 combined_pat = 'T%T7%_combined.mat';           % e.g. T0000003_combined.mat
-detected_dir = 'Z:\Rie\Data\Raw_Data\<batID>\done';
+detected_dir = 'Z:\Rie\Data\Preprocessing\Mic\Mic_Data_Detected\<batID>\done';
 detected_pat = '%D%_T%T7%_detected.mat';       % e.g. 20260709_T0000003_detected.mat
 
 % -- output roots (defaults match the single-trial scripts) --
 out_root_proc  = 'Z:\Rie\Data\Beampattern_proc';        % stage-1 bp_proc .mat + plots (per bat)
-out_root_stats = 'Z:\Rie\Stats\Beampattern_analysis';   % stage-4 study tables + plots
+% out_root_stats = 'Z:\Rie\Stats\Beampattern_analysis'; % stage-4 output (MOVED OUT)
 
 % -- optional explicit trial list (overrides auto-scan). [] = auto-scan bat_pos --
 trials_override = [];
@@ -149,7 +155,7 @@ for i = 1:numel(trial_nums)
         %% QC plots
         if make_plots
             try
-                plot_mic_selection_qc(bat_pos_file, mic_pos_file);
+                plot_mic_zone_selection_qc(bat_pos_file, mic_pos_file);
                 plot_beamaim_qc(bp_proc_file, out);
                 close all;
             catch MEp
@@ -157,7 +163,8 @@ for i = 1:numel(trial_nums)
             end
         end
 
-        %% stage 4 -- trial metrics + study tables
+        %% stage 4 -- trial metrics + study tables  (MOVED OUT: see trial_analysis_batch_processing.m)
+        %{
         if do_stage4
             run_trial_analysis(struct( ...
                 'bp_proc_file', bp_proc_file, ...
@@ -166,6 +173,7 @@ for i = 1:numel(trial_nums)
                 'plot',         make_plots));
             if make_plots, close all; end
         end
+        %}
 
         n_ok = n_ok + 1;
     catch ME
@@ -178,8 +186,10 @@ fprintf('\n==== Beam session batch done: %d OK, %d failed, %d skipped ====\n', n
 if ~isempty(failed),  fprintf('Failed:  %s\n', strjoin(failed,  ', ')); end
 if ~isempty(skipped), fprintf('Skipped: %s\n', strjoin(skipped, ', ')); end
 
-%% ---- pooled pre-flight beam figure across the session's trials ----
+%% ---- pooled pre-flight beam figure across the session's trials ----  (MOVED OUT)
 % (uses goal-relative azimuth, correct for pooling across moving perches)
+% Now produced by trial_analysis_batch_processing.m.
+%{
 if do_stage4 && make_plots
     pfmat = fullfile(out_root_stats, 'preflight_calls.mat');
     if isfile(pfmat)
@@ -193,3 +203,4 @@ if do_stage4 && make_plots
         end
     end
 end
+%}

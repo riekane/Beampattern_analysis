@@ -4,10 +4,11 @@ function bd = estimate_beam_direction(mic_xyz, bat_xyz, call_dB, opts)
 %   bd = ESTIMATE_BEAM_DIRECTION(mic_xyz, bat_xyz, call_dB)
 %   bd = ESTIMATE_BEAM_DIRECTION(mic_xyz, bat_xyz, call_dB, opts)
 %
-% Port of the beam-direction logic inside beam_aim.m
-% (Beampattern_analysis_Magdielexample), refactored into a standalone per-call
-% function and made MARKER-FREE. The Magdiel pipeline measures head aim from
-% three head markers (track.tip_smooth/left_smooth/right_smooth -> head_aim).
+% Port of the beam-direction logic inside beam_aim.m from the example
+% beampattern-analysis pipeline this project was adapted from, refactored into a
+% standalone per-call function and made MARKER-FREE. That pipeline measures head
+% aim from three head markers (track.tip_smooth/left_smooth/right_smooth ->
+% head_aim).
 % Rie's rig has no head marker, so head direction is ESTIMATED from the sonar
 % beam itself: the direction of maximum emitted energy is used as a proxy for
 % where the bat's head points.
@@ -19,7 +20,7 @@ function bd = estimate_beam_direction(mic_xyz, bat_xyz, call_dB, opts)
 %   2. The loudest mic gives a coarse, discrete beam direction (peak-mic).
 %   3. RBF-interpolate the per-mic dB over the (az,el) sphere and mask to the
 %      convex region actually sampled by the mics.
-%   4. ANCHORED refinement: search the masked interpolated surface only within
+%   4. Anchored refinement: search the masked interpolated surface only within
 %      opts.anchor_win_deg of the peak mic, and take that local maximum as the
 %      beam direction. This turns the coarse peak-mic into a CONTINUOUS estimate
 %      (sub-mic resolution) while preventing the interpolation from jumping to a
@@ -28,7 +29,7 @@ function bd = estimate_beam_direction(mic_xyz, bat_xyz, call_dB, opts)
 %   5. A Gaussian fit of the azimuth slice through the beam elevation gives the
 %      beam half-width `sigma`.
 %
-% WHY ANCHORED (not beam_aim.m's literal el~=0 midline): beam_aim.m reads the
+% Why anchored (not beam_aim.m's literal el~=0 midline): beam_aim.m reads the
 % azimuth off the horizon slice el~=0 and is checked call-by-call in a GUI. Run
 % unattended and marker-free, that slice is fragile: when the mics don't
 % straddle the bat's horizon the RBF extrapolates at the sampled-region edge and
@@ -67,8 +68,8 @@ function bd = estimate_beam_direction(mic_xyz, bat_xyz, call_dB, opts)
 %   .peak_el_deg   elevation of loudest mic
 %
 % Written for the Vicon+Avisoft beam-pattern pipeline, 2026. Depends on
-% rbfcreate.m, rbfinterp.m and gaussfit.m (copied into this folder from the
-% Magdiel beampattern_preprocessing toolbox).
+% rbfcreate.m, rbfinterp.m and gaussfit.m. Updated by Rie Kaneko on
+% 7/14/2026
 
 if nargin < 4 || isempty(opts), opts = struct(); end
 if ~isfield(opts,'method'),          opts.method          = 'anchored'; end

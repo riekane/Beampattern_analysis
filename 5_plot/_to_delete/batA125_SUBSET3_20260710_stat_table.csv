@@ -1,0 +1,4 @@
+subject,session,trial,side_taken,blocked,block_side,visibility,n_preflight_calls,preflight_lat,n_zone1_calls,zone1_lat,n_junction_calls,junction_lat,junction_predicts_side
+batA125,20260710,7,LEFT,0,,normal,66,-0.0988,77,-0.0968,9,1.2917,1
+batA125,20260710,8,RIGHT,0,,normal,3,-0.3356,15,-0.1099,16,-0.5523,1
+batA125,20260710,9,RIGHT,0,,normal,42,-0.1402,51,-0.1153,15,-0.7427,1

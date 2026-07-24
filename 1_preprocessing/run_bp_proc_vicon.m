@@ -1,8 +1,8 @@
 %% run_bp_proc_vicon.m
 % Entry script to PRODUCE a bp_proc_file for the Vicon + Avisoft rig.
 %
-% A "bp_proc_file" (…_mic_data_bp_proc.mat) is the output of the Magdiel
-% pipeline's bp_proc.m step. It is the input that run_beamaim_maze.m /
+% A "bp_proc_file" (…_mic_data_bp_proc.mat) is the output of the upstream
+% beampattern_processing pipeline's bp_proc.m step. It is the input that run_beamaim_maze.m /
 % estimate_beam_direction.m consume. bp_proc_vicon.m reproduces that step for
 % Rie's data: it is NON-INTERACTIVE (no uigetfile), reads Rie's own file
 % formats, and — because there is no measured microphone calibration yet —

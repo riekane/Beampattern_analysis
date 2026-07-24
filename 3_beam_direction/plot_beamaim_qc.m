@@ -20,6 +20,8 @@ function plot_beamaim_qc(bp_proc_file, out, arrow_len_m, save_png)
 %                  are read back from proc in bp_proc_file.
 %   arrow_len_m  - arrow length in metres (default 0.3).
 
+%   Written by Rie Kaneko on 7/14/2026
+
 if nargin < 3 || isempty(arrow_len_m), arrow_len_m = 0.3; end
 if nargin < 4, save_png = ''; end   % '' -> auto path (bat's \plot folder); 'none' -> don't save
 bpp = load(bp_proc_file);
@@ -31,7 +33,7 @@ end
 
 bat = bpp.proc.bat_loc_at_call;                 % calls x 3 (metres)
 mic = bpp.mic_loc;                              % mics x 3
-az  = deg2rad(out.beam_aim_az_el_deg(:,1));
+az  = deg2rad(out.beam_aim_az_el_deg(:,1) + az_offset_deg);
 meth = out.beam_aim_method;
 
 figure('Color','w','Position',[80 80 900 780]); hold on; axis equal; grid on;
@@ -48,7 +50,7 @@ text(mic(good,1), mic(good,2), num2str(find(good)), 'FontSize',8, ...
 % bat's position there was not measured). Falls back to connecting the call
 % positions if no interpolated track is stored (older files).
 traj_h = gobjects(1,0); traj_l = {};
-trajcol = [.55 .55 .55];
+trajcol = [0 0 0];
 if isfield(bpp,'track') && isfield(bpp.track,'track_interp') && ~isempty(bpp.track.track_interp)
     T = bpp.track.track_interp;                          % 1 ms track (metres)
     v = ~isnan(T(:,1));
@@ -57,18 +59,32 @@ if isfield(bpp,'track') && isfield(bpp.track,'track_interp') && ~isempty(bpp.tra
     hs = gobjects(0); hd = gobjects(0);
     for k = 1:numel(runS)                                % solid = tracked
         hh = plot(T(runS(k):runE(k),1), T(runS(k):runE(k),2), '-', ...
-                  'Color',trajcol, 'LineWidth',1);
+                  'Color',trajcol, 'LineWidth',2.5);
         if isempty(hs), hs = hh; end
     end
     for k = 1:numel(runS)-1                              % dashed = interpolated bridge
         hh = plot([T(runE(k),1) T(runS(k+1),1)], [T(runE(k),2) T(runS(k+1),2)], '--', ...
-                  'Color',trajcol, 'LineWidth',1);
+                  'Color',trajcol, 'LineWidth',2);
         if isempty(hd), hd = hh; end
     end
-    if ~isempty(hs), traj_h(end+1) = hs; traj_l{end+1} = 'tracked path'; end
-    if ~isempty(hd), traj_h(end+1) = hd; traj_l{end+1} = 'interpolated (gap)'; end
+    if ~isempty(hs), traj_h(end+1) = hs; traj_l{end+1} = 'flight path'; end
+    if ~isempty(hd), traj_h(end+1) = hd; traj_l{end+1} = 'interpolated gap'; end
 else
-    plot(bat(:,1), bat(:,2), '-', 'Color',[.6 .6 .6]);  % fallback: connect calls
+    plot(bat(:,1), bat(:,2), '-', 'Color',trajcol, 'LineWidth',2.5);  % fallback: connect calls
+end
+
+% post-TTL landing tail: the ~0.1 s of Vicon AFTER the audio ended (trimmed off
+% track_interp), where the bat usually touches down. Drawn contiguous with the
+% path (same thick black) + a touchdown dot, so a successful landing is obvious.
+% The beam-aim arrows (audio overlay) are unchanged -- they stay on the calls.
+if isfield(bpp,'track') && isfield(bpp.track,'track_tail') && ~isempty(bpp.track.track_tail)
+    Tt = bpp.track.track_tail; vt = ~isnan(Tt(:,1));
+    if any(vt)
+        ht = plot(Tt(vt,1), Tt(vt,2), '-', 'Color',trajcol, 'LineWidth',2.5);
+        lv = find(vt,1,'last');
+        plot(Tt(lv,1), Tt(lv,2), 'o', 'MarkerSize',10, 'MarkerFaceColor','k','MarkerEdgeColor','k');
+        % landing tail drawn but kept OUT of the legend (not a separate series)
+    end
 end
 
 % ---- maze overlay (walls / start line / perches) ----
@@ -93,18 +109,24 @@ if isfield(bpp,'maze') && ~isempty(bpp.maze)
              'LineWidth',1.2,'HandleVisibility','off');
     end
 end
-% perches: prefer the JSON-labelled maze perch, else the Vicon-tracked position.
+% perches: prefer the Vicon-tracked position, else the JSON-labelled maze perch.
 tp = local_perch(bpp,'takeoff_perch','tp_position');
-lp = local_perch(bpp,'landing_perch','lp_position');
+LP = local_landing_list(bpp);                   % Nx3 mm, ALL landing perches
 if ~isempty(tp)
-    perch_h(end+1) = scatter(tp(1)*s, tp(2)*s, 200,'p', ...
-            'MarkerFaceColor',[1 .84 0],'MarkerEdgeColor','k');
+    perch_h(end+1) = scatter(tp(1)*s, tp(2)*s, 400,'o', ...
+            'MarkerFaceColor',[1 .84 0],'MarkerEdgeColor','k','LineWidth',1.5);
     perch_l{end+1} = 'take-off perch';
 end
-if ~isempty(lp)
-    perch_h(end+1) = scatter(lp(1)*s, lp(2)*s, 240,'d', ...
-            'MarkerFaceColor',[0 .70 .90],'MarkerEdgeColor','k');
-    perch_l{end+1} = 'landing perch';
+lp_cols = {[0 .70 .90],[.93 .53 .18],[.47 .67 .19],[.30 .30 .90]};
+for iL = 1:size(LP,1)
+    cc = lp_cols{mod(iL-1,numel(lp_cols))+1};
+    perch_h(end+1) = scatter(LP(iL,1)*s, LP(iL,2)*s, 360,'o', ...
+            'MarkerFaceColor',cc,'MarkerEdgeColor','k','LineWidth',1.5); %#ok<AGROW>
+    if size(LP,1) > 1
+        perch_l{end+1} = sprintf('landing perch %d', iL); %#ok<AGROW>
+    else
+        perch_l{end+1} = 'landing perch';                %#ok<AGROW>
+    end
 end
 
 % beam-aim arrows
@@ -119,11 +141,17 @@ for iC = 1:size(bat,1)
 end
 
 xlabel('X (m)'); ylabel('Y (m)');
-title('Beam-aim (head-direction proxy) — top view');
-h1 = plot(nan,nan,'-','Color',blue,'LineWidth',2);
-h2 = plot(nan,nan,'-','Color',red,'LineWidth',2);
-legend([h1 h2 traj_h perch_h], ...
-       [{'interp + Gaussian fit','peak-mic fallback'} traj_l perch_l], 'Location','best');
+title(['Beam-aim (top view)  ' frame_tag]);
+if any(meth == 2)     % peak-mic fallback actually used -> show both beam-aim types
+    h1 = plot(nan,nan,'-','Color',blue,'LineWidth',2);
+    h2 = plot(nan,nan,'-','Color',red,'LineWidth',2);
+    aim_h = [h1 h2];
+    aim_l = {'beam aim (interp + Gaussian fit)','beam aim (peak-mic fallback)'};
+else                  % all calls used interp+fit -> a single "beam aim" entry
+    aim_h = plot(nan,nan,'-','Color',blue,'LineWidth',2);
+    aim_l = {'beam aim'};
+end
+legend([aim_h traj_h perch_h], [aim_l traj_l perch_l], 'Location','best');
 box on;
 
 % ---- save the QC figure into the bat's \plot folder ----
@@ -148,18 +176,47 @@ if ~strcmpi(save_png,'none')
     pdir = fileparts(save_png);
     if ~isempty(pdir) && ~isfolder(pdir), mkdir(pdir); end
     saveas(gcf, save_png);
-    fprintf('Saved QC plot %s\n', save_png);
+    [figdir, figbase] = fileparts(save_png);
+    save_fig = fullfile(figdir, [figbase '.fig']);   % MATLAB .fig, same name & location as the .png
+    savefig(gcf, save_fig);
+    fprintf('Saved QC plot %s (+ %s)\n', save_png, [figbase '.fig']);
 end
 end
 
+function LP = local_landing_list(bpp)
+% All landing-perch marker-1 positions (Nx3 mm). Prefers perch_pos.landing (>=1
+% perch, carried from the bat_pos file); falls back to the single maze
+% landing_perch / Vicon lp_position for older bp_proc files.
+    LP = [];
+    if isfield(bpp,'perch_pos') && isstruct(bpp.perch_pos) && isfield(bpp.perch_pos,'landing') ...
+            && ~isempty(bpp.perch_pos.landing)
+        P = bpp.perch_pos.landing;
+        for k = 1:numel(P)
+            if isfield(P(k),'marker1') && numel(P(k).marker1) >= 3 && ~any(isnan(P(k).marker1(1:3)))
+                LP(end+1,:) = P(k).marker1(1:3); %#ok<AGROW>
+            end
+        end
+    end
+    if isempty(LP)
+        p = [];
+        if isfield(bpp,'lp_position') && ~isempty(bpp.lp_position)
+            p = bpp.lp_position;
+        elseif isfield(bpp,'maze') && isstruct(bpp.maze) && isfield(bpp.maze,'landing_perch') ...
+                && ~isempty(bpp.maze.landing_perch)
+            p = bpp.maze.landing_perch;
+        end
+        if ~isempty(p), LP = p(1:3); end
+    end
+end
+
 function p = local_perch(bpp, maze_field, vicon_field)
-% Resolve a perch [x y z] (mm): prefer the JSON-labelled maze perch, else the
-% Vicon-tracked perch position carried in the bp_proc file. Empty if neither.
+% Resolve a perch [x y z] (mm): prefer the Vicon-tracked perch position carried
+% in the bp_proc file, else the JSON-labelled maze perch. Empty if neither.
     p = [];
-    if isfield(bpp,'maze') && isstruct(bpp.maze) && isfield(bpp.maze,maze_field) ...
+    if isfield(bpp,vicon_field) && ~isempty(bpp.(vicon_field))
+        p = bpp.(vicon_field);
+    elseif isfield(bpp,'maze') && isstruct(bpp.maze) && isfield(bpp.maze,maze_field) ...
             && ~isempty(bpp.maze.(maze_field))
         p = bpp.maze.(maze_field);
-    elseif isfield(bpp,vicon_field) && ~isempty(bpp.(vicon_field))
-        p = bpp.(vicon_field);
     end
 end
