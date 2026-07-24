@@ -31,6 +31,34 @@ if nargin < 2 || isempty(out)
     out.beam_aim_method    = bpp.proc.beam_aim_method;
 end
 
+% ---- draw in the TAKE-OFF-CENTRED maze frame (take-off -> (0,0), deeper +Y) ----
+% Prefer the stored takeoff_centered.* (added by bp_proc stage 1); compute it on
+% the fly for older files that predate it. Raw fields are untouched -- we only
+% swap the local copies used for drawing, and rotate the beam azimuth by +180
+% deg to match. With no take-off perch available it stays in the raw frame.
+az_offset_deg = 0; frame_tag = '(raw Vicon frame)';
+if ~isfield(bpp,'takeoff_centered') && exist('add_takeoff_centered_coords','file')
+    try, bpp = add_takeoff_centered_coords(bpp); catch, end
+end
+if isfield(bpp,'takeoff_centered')
+    TC = bpp.takeoff_centered;
+    if isfield(TC,'mic_loc')         && ~isempty(TC.mic_loc),         bpp.mic_loc = TC.mic_loc; end
+    if isfield(TC,'bat_loc_at_call') && ~isempty(TC.bat_loc_at_call), bpp.proc.bat_loc_at_call = TC.bat_loc_at_call; end
+    if isfield(bpp,'track') && isfield(TC,'track')
+        if isfield(TC.track,'track_interp') && ~isempty(TC.track.track_interp), bpp.track.track_interp = TC.track.track_interp; end
+        if isfield(TC.track,'track_tail')   && ~isempty(TC.track.track_tail),   bpp.track.track_tail   = TC.track.track_tail;   end
+    end
+    if isfield(bpp,'maze') && isfield(TC,'maze')
+        for mf = {'left_wall','right_wall','start_line','takeoff_perch','landing_perch'}
+            if isfield(TC.maze,mf{1}) && ~isempty(TC.maze.(mf{1})), bpp.maze.(mf{1}) = TC.maze.(mf{1}); end
+        end
+    end
+    if isfield(TC,'perch_pos')   && ~isempty(TC.perch_pos),   bpp.perch_pos   = TC.perch_pos;   end
+    if isfield(TC,'tp_position') && ~isempty(TC.tp_position), bpp.tp_position = TC.tp_position; end
+    if isfield(TC,'lp_position') && ~isempty(TC.lp_position), bpp.lp_position = TC.lp_position; end
+    az_offset_deg = 180; frame_tag = '(take-off-centred: +X = right arm, +Y = deeper)';
+end
+
 bat = bpp.proc.bat_loc_at_call;                 % calls x 3 (metres)
 mic = bpp.mic_loc;                              % mics x 3
 az  = deg2rad(out.beam_aim_az_el_deg(:,1) + az_offset_deg);
