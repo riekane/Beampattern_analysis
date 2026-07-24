@@ -90,7 +90,6 @@ wiring ever differs.
 adds `data.takeoff_centered` — shifted copies of every plotted location/vector
 in a frame where the take-off perch is the origin and the maze extends toward
 +Y. Raw fields are untouched (see `lib/README.md`).
-
 ---
 
 ## `cfg` (see `bp_proc_vicon.m` / `run_bp_proc_vicon.m` for the full list)
